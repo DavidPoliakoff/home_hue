@@ -2,16 +2,29 @@
 import colorsys
 import multiprocessing
 import queue
-
+import asyncio
 import phue
+import random as z_autocomp_random
+import time
+
+try:
+    from socket import socketpair
+except ImportError:
+    from asyncio.windows_utils import socketpair
 
 HUE_IP = "192.168.1.38"
+MAX_HISTORY = 3
 
-aaa = [1, 2, 3]
+history_global = []
+aaa = [1, 2, 3, 4, 5, 6, 7, 8]
+bal = [4, 5]
+
+def his(num):
+    return [] if (num>(len(history_global))) else history_global[-num]
 
 BRIGHTNESS = 0
 ONNESS = True
-bedlights = [1, 3]
+bedlights = [1, 3, 6, 7, 8]
 halllights = [2]
 bl = bedlights
 hl = halllights
@@ -36,11 +49,29 @@ onness = {"on": True}
 
 hue_bridge = phue.Bridge(HUE_IP)
 
+class cmd_with_history:
+    def __init__(self):
+        self.history = []
+    def get_history(self,num):
+        return [] if (num>(len(self.history))) else self.history[-num]
+    def __call__(self,lights,actions):
+        if (len(self.history)<MAX_HISTORY) or not (lights==self.history[-1]):
+            self.history.append(lights)
+        for light in lights:
+            hue_bridge.set_light(light,actions)
+        #if not (lights == self.history[-1]):
+        self.history = self.history[-MAX_HISTORY:]
+
+tracked_commands = dict(lights=cmd_with_history())
 
 def set_across_lights(lights, actions):
-    for light in lights:
-        hue_bridge.set_light(light, actions)
+    tracked_commands["lights"](lights,actions)
 
+def his(num):
+    return tracked_commands["lights"].get_history(num)
+
+def last():
+    return his(1)
 
 def sal(lights, actions):
     set_across_lights(lights, actions)
@@ -144,9 +175,22 @@ soft_yellow = (16922, 200)
 striking_blue = (47492, 214)
 striking_fuschia = (54492, 214)
 trippy = [striking_blue, striking_fuschia]
-bal = [4, 5]
 
 sunset = [soft_orange, soft_yellow]
+
+
+class HueTask:
+    def unsubscribe(self):
+        self.loop.remove_reader(self.rsock)
+        self.loop.stop()
+    def __init__(self,reactor=unsubscribe,socket_wait_time=100):
+        rsock, wsock = socketpair()
+        self.rsock = rsock
+        self.wsock = wsock
+        self.loop = asyncio.get_event_loop()
+        self.socket_wait_time = socket_wait_time
+        self.reactor = reactor
+        self.loop.add_reader(rsock,self.reactor)
 
 
 def hs(huesat):
@@ -156,14 +200,32 @@ def hs(huesat):
 
 def apply_color_list(light_list, color_list):
     for num in range(len(light_list)):
-        sal([light_list[num]], hs(color_list[num]))
+        sal([light_list[num]], hs(color_list[num%len(color_list)]))
 
+def randomize_lights(light_list):
+    previous_history = tracked_commands["lights"].history
+    for light in light_list:
+        random_r = z_autocomp_random.random()
+        random_g = z_autocomp_random.random()
+        random_b = z_autocomp_random.random()
+        sal([light],hue(random_r,random_g,random_b))
+    tracked_commands["lights"].history = previous_history
+    tracked_commands["lights"].history.append(light_list)
+    tracked_commands["lights"].history = tracked_commands["lights"].history[-MAX_HISTORY:]
 
 def acs(light_list, color_list):
     apply_color_list(light_list, color_list)
 
-
-queued_actions = multiprocessing.Queue()
+def flicker(light_list):
+    previous_history = tracked_commands["lights"].history
+    for light in light_list:
+        sal([light],offness)
+        time.sleep(1)
+        sal([light],onness)
+        time.sleep(1)
+    tracked_commands["lights"].history = previous_history
+    tracked_commands["lights"].history.append(light_list)
+    tracked_commands["lights"].history = tracked_commands["lights"].history[-MAX_HISTORY:]
 
 
 def cycle_lightset(task_queue: multiprocessing.Queue, light_set, speed):
@@ -180,10 +242,36 @@ def cycle_lightset(task_queue: multiprocessing.Queue, light_set, speed):
 
 
 def start_cycling(light_set, speed):
-    p = multiprocessing.Process(target=cycle_lightset(queued_actions, light_set, speed))
-    p.start()
+    # p = multiprocessing.Process(target=cycle_lightset(queued_actions, light_set, speed))
+    # p.start()
     print("STARTED")
-    return p
+
+def just(light_set):
+    previous_history = tracked_commands["lights"].history
+    sal(aaa,offness)
+    sal(light_set,onness)
+    tracked_commands["lights"].history = previous_history
+    tracked_commands["lights"].history.append(light_set)
+    tracked_commands["lights"].history = tracked_commands["lights"].history[-MAX_HISTORY:]
+
+
+def off(lights,tt=10):
+    sal(lights,timed(offness,tt))
+
+def on(lights,tt=10):
+    sal(lights,timed(onness,tt))
+
+def last(cmd):
+    sal(his(1),cmd)
+
+def oneof(lights, num_lights = 1):
+    new_lights = [z_autocomp_random.sample(lights,num_lights)]
+    previous_history = tracked_commands["lights"].history
+    sal(lights,offness)
+    sal(new_lights,onness)
+    tracked_commands["lights"].history = previous_history
+    tracked_commands["lights"].history.append(new_lights)
+    tracked_commands["lights"].history = tracked_commands["lights"].history[-MAX_HISTORY:]
 
 
 get_light_status()
